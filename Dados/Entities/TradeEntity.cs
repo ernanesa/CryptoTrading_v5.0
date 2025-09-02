@@ -1,10 +1,7 @@
-using System.ComponentModel.DataAnnotations;
-
 namespace Dados.Entities;
 
 public class TradeEntity
 {
-    [Key]
     public int Tid { get; set; }
     public string Symbol { get; set; } = string.Empty;
     public long Date { get; set; }

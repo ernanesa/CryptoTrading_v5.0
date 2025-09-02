@@ -126,7 +126,7 @@ public class DataController : ControllerBase
     /// <param name="cancellationToken">Token para cancelamento da operação</param>
     /// <returns>Resultado da operação de coleta de order books</returns>
     [HttpGet("collect-order-books")]
-    public async Task<IActionResult> CollectOrderBooks([FromQuery] string limit = "10", CancellationToken cancellationToken = default)
+    public async Task<IActionResult> CollectOrderBooks([FromQuery] int? limit = 10, CancellationToken cancellationToken = default)
     {
         try
         {

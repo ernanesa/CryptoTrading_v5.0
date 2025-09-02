@@ -40,7 +40,7 @@ public class CryptoTradingDbContext : DbContext
 
         // TradeEntity
         modelBuilder.Entity<TradeEntity>()
-            .HasKey(t => t.Tid);
+            .HasKey(t => new { t.Symbol, t.Tid });
 
         // CandleEntity
         modelBuilder.Entity<CandleEntity>()
