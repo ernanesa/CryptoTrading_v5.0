@@ -100,8 +100,8 @@ CREATE INDEX IF NOT EXISTS "IX_Candles_Symbol_Resolution_Timestamp" ON "Candles"
 
 -- Create __EFMigrationsHistory table for EF Core tracking
 CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
-    "MigrationId" nvarchar(150) NOT NULL,
-    "ProductVersion" nvarchar(32) NOT NULL,
+    "MigrationId" varchar(150) NOT NULL,
+    "ProductVersion" varchar(32) NOT NULL,
     CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
 );
 

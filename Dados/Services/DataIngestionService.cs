@@ -95,10 +95,7 @@ public class DataIngestionService
             "AR-BRL",     // Arweave - Permanent storage
             "KSM-BRL",    // Kusama - Polkadot canary
             "WAVES-BRL",  // Waves - Custom tokens platform
-            "ZIL-BRL",    // Zilliqa - Sharding pioneer
-            "DOGE-BRL",   // Dogecoin - Popular altcoin
-            "SHIB-BRL",   // Shiba Inu - Popular altcoin
-            "AXS-BRL"     // Axie Infinity - Gaming/NFT
+            "ZIL-BRL"     // Zilliqa - Sharding pioneer
         };
     }
 
@@ -106,71 +103,55 @@ public class DataIngestionService
     {
         try
         {
-            dynamic symbolsResponse = await _mercadoBitcoinClient.GetSymbolsAsync();
+            // Obter a lista das 50 moedas selecionadas
+            var selectedSymbols = GetTopTier50CryptocurrencyList();
+            _logger.LogInformation("Starting collection for {Count} selected symbols", selectedSymbols.Count);
 
-            // Log the response structure for debugging
-            Console.WriteLine($"Symbols response type: {symbolsResponse.GetType()}");
-            Console.WriteLine($"Symbols response: {JsonSerializer.Serialize(symbolsResponse)}");
+            // Criar entidades diretamente da lista selecionada
+            var filteredEntities = selectedSymbols.Select(symbol => new SymbolEntity
+            {
+                Symbol = symbol,
+                BaseCurrency = symbol.Replace("-BRL", ""),
+                QuoteCurrency = "BRL",
+                Status = "ACTIVE",
+                BasePrecision = 8,
+                QuotePrecision = 2,
+                AmountPrecision = 8,
+                MinOrderAmount = 0.00000001m,
+                MinOrderValue = 1.00m,
+                CollectedAt = DateTime.UtcNow
+            }).ToList();
 
-            // Try different approaches to access the symbols data
-            IEnumerable<dynamic> symbolsData = null;
+            _logger.LogInformation("Created {Count} entities from selected symbols", filteredEntities.Count);
 
-            if (symbolsResponse is IEnumerable<dynamic> enumerable)
+            // Usar transação com estratégia de execução
+            var strategy = _dbContext.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                symbolsData = enumerable;
-            }
-            else if (symbolsResponse.Symbol is IEnumerable<dynamic> symbolArray)
-            {
-                symbolsData = symbolArray;
-            }
-            else
-            {
-                _logger.LogWarning("Unexpected response structure for symbols");
-                return;
-            }
+                using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-            var entities = symbolsData.Select(s =>
-            {
-                // Handle different possible structures
-                if (s is string symbolString)
+                try
                 {
-                    // If it's just a string, create a minimal entity
-                    return new SymbolEntity
-                    {
-                        Symbol = symbolString,
-                        BaseCurrency = symbolString.Replace("-BRL", ""),
-                        QuoteCurrency = "BRL",
-                        Status = "ACTIVE",
-                        BasePrecision = 8,
-                        QuotePrecision = 2,
-                        AmountPrecision = 8,
-                        MinOrderAmount = 0.00000001m,
-                        MinOrderValue = 1.00m,
-                        CollectedAt = DateTime.UtcNow
-                    };
+                    // Primeiro, remover todos os símbolos existentes usando SQL direto
+                    await _dbContext.Database.ExecuteSqlRawAsync("DELETE FROM \"Symbols\"", cancellationToken);
+                    _logger.LogInformation("Deleted all existing symbols using raw SQL");
+
+                    // Limpar o contexto para evitar conflitos
+                    _dbContext.ChangeTracker.Clear();
+
+                    // Agora adicionar apenas os símbolos filtrados
+                    await _dbContext.Symbols.AddRangeAsync(filteredEntities, cancellationToken);
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+
+                    await transaction.CommitAsync(cancellationToken);
+                    _logger.LogInformation("Collected {Count} symbols from the predefined list of {TotalSelected} symbols", filteredEntities.Count, selectedSymbols.Count);
                 }
-                else
+                catch
                 {
-                    // Try to access properties dynamically
-                    return new SymbolEntity
-                    {
-                        Symbol = (string)(s.Symbol ?? s.Pair ?? s),
-                        BaseCurrency = (string)(s.BaseCurrency ?? s.Base ?? ((string)(s.Symbol ?? s.Pair ?? s)).Replace("-BRL", "")),
-                        QuoteCurrency = (string)(s.QuoteCurrency ?? s.Quote ?? "BRL"),
-                        Status = (string)(s.Status ?? "ACTIVE"),
-                        BasePrecision = (int)(s.BasePrecision ?? 8),
-                        QuotePrecision = (int)(s.QuotePrecision ?? 2),
-                        AmountPrecision = (int)(s.AmountPrecision ?? 8),
-                        MinOrderAmount = (decimal)(s.MinOrderAmount ?? 0.00000001m),
-                        MinOrderValue = (decimal)(s.MinOrderValue ?? 1.00m),
-                        CollectedAt = DateTime.UtcNow
-                    };
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
                 }
             });
-
-            await _dbContext.Symbols.AddRangeAsync(entities, cancellationToken);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("Collected {Count} symbols", entities.Count());
         }
         catch (Exception ex)
         {
@@ -192,24 +173,60 @@ public class DataIngestionService
                 return;
             }
 
-            var symbolsParam = string.Join(",", activeSymbols);
-            dynamic tickersResponse = await _mercadoBitcoinClient.GetTickersAsync(symbolsParam);
-            var entities = ((IEnumerable<dynamic>)tickersResponse).Select(t => new TickerEntity
-            {
-                Symbol = (string)t.Pair,
-                Last = decimal.Parse((string)t.Last),
-                High = decimal.Parse((string)t.High),
-                Low = decimal.Parse((string)t.Low),
-                Vol = decimal.Parse((string)t.Vol),
-                Buy = decimal.Parse((string)t.Buy),
-                Sell = decimal.Parse((string)t.Sell),
-                Date = long.Parse((string)t.Date),
-                CollectedAt = DateTime.UtcNow
-            });
+            // Limpar tickers de símbolos que não estão na lista selecionada
+            var tickersToRemove = await _dbContext.Tickers
+                .Where(t => !activeSymbols.Contains(t.Symbol))
+                .ToListAsync(cancellationToken);
 
-            await _dbContext.Tickers.AddRangeAsync(entities, cancellationToken);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("Collected {Count} tickers for {SymbolCount} predefined symbols", entities.Count(), activeSymbols.Count);
+            if (tickersToRemove.Any())
+            {
+                _dbContext.Tickers.RemoveRange(tickersToRemove);
+                _logger.LogInformation("Removed {Count} tickers from symbols not in the selected list", tickersToRemove.Count);
+            }
+
+            var entities = new List<TickerEntity>();
+
+            // Processar um símbolo por vez para evitar problemas
+            foreach (var symbol in activeSymbols)
+            {
+                try
+                {
+                    _logger.LogInformation("Processing symbol: {Symbol}", symbol);
+                    dynamic tickerResponse = await _mercadoBitcoinClient.GetTickersAsync(symbol);
+
+                    // var responseJson = JsonSerializer.Serialize(tickerResponse);
+                    // ((ILogger)_logger).LogInformation("Response for {Symbol}: {Response}", symbol, responseJson);
+
+                    // Assumir que a resposta é um único objeto ticker
+                    var entity = new TickerEntity
+                    {
+                        Symbol = symbol,
+                        Last = ParseDecimal(tickerResponse?.Last),
+                        High = ParseDecimal(tickerResponse?.High),
+                        Low = ParseDecimal(tickerResponse?.Low),
+                        Vol = ParseDecimal(tickerResponse?.Vol),
+                        Buy = ParseDecimal(tickerResponse?.Buy),
+                        Sell = ParseDecimal(tickerResponse?.Sell),
+                        Date = ParseLong(tickerResponse?.Date),
+                        CollectedAt = DateTime.UtcNow
+                    };
+
+                    entities.Add(entity);
+                    _logger.LogInformation("Successfully processed ticker for {Symbol}", symbol);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error collecting ticker for symbol {Symbol}", symbol);
+                    // Continue com outros símbolos
+                }
+            }
+
+            if (entities.Any())
+            {
+                await _dbContext.Tickers.AddRangeAsync(entities, cancellationToken);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogInformation("Collected {Count} tickers for {SymbolCount} predefined symbols", entities.Count, activeSymbols.Count);
+            }
         }
         catch (Exception ex)
         {
@@ -229,6 +246,17 @@ public class DataIngestionService
             {
                 _logger.LogWarning("No symbols found in the predefined list");
                 return;
+            }
+
+            // Limpar order books de símbolos que não estão na lista selecionada
+            var orderBooksToRemove = await _dbContext.OrderBooks
+                .Where(ob => !activeSymbols.Contains(ob.Symbol))
+                .ToListAsync(cancellationToken);
+
+            if (orderBooksToRemove.Any())
+            {
+                _dbContext.OrderBooks.RemoveRange(orderBooksToRemove);
+                _logger.LogInformation("Removed {Count} order books from symbols not in the selected list", orderBooksToRemove.Count);
             }
 
             var entities = new List<OrderBookEntity>();
@@ -279,6 +307,17 @@ public class DataIngestionService
             {
                 _logger.LogWarning("No symbols found in the predefined list");
                 return;
+            }
+
+            // Limpar trades de símbolos que não estão na lista selecionada
+            var tradesToRemove = await _dbContext.Trades
+                .Where(t => !activeSymbols.Contains(t.Symbol))
+                .ToListAsync(cancellationToken);
+
+            if (tradesToRemove.Any())
+            {
+                _dbContext.Trades.RemoveRange(tradesToRemove);
+                _logger.LogInformation("Removed {Count} trades from symbols not in the selected list", tradesToRemove.Count);
             }
 
             var allEntities = new List<TradeEntity>();
@@ -332,6 +371,17 @@ public class DataIngestionService
             {
                 _logger.LogWarning("No symbols found in the predefined list");
                 return;
+            }
+
+            // Limpar candles de símbolos que não estão na lista selecionada
+            var candlesToRemove = await _dbContext.Candles
+                .Where(c => !activeSymbols.Contains(c.Symbol))
+                .ToListAsync(cancellationToken);
+
+            if (candlesToRemove.Any())
+            {
+                _dbContext.Candles.RemoveRange(candlesToRemove);
+                _logger.LogInformation("Removed {Count} candles from symbols not in the selected list", candlesToRemove.Count);
             }
 
             var to = (int)DateTimeOffset.Now.ToUnixTimeSeconds();
@@ -391,6 +441,17 @@ public class DataIngestionService
                 return;
             }
 
+            // Limpar asset fees de ativos que não estão na lista selecionada
+            var assetFeesToRemove = await _dbContext.AssetFees
+                .Where(af => !activeAssets.Contains(af.Asset))
+                .ToListAsync(cancellationToken);
+
+            if (assetFeesToRemove.Any())
+            {
+                _dbContext.AssetFees.RemoveRange(assetFeesToRemove);
+                _logger.LogInformation("Removed {Count} asset fees from assets not in the selected list", assetFeesToRemove.Count);
+            }
+
             var entities = new List<AssetFeeEntity>();
 
             foreach (var asset in activeAssets)
@@ -441,24 +502,58 @@ public class DataIngestionService
                 return;
             }
 
-            var allEntities = new List<AssetNetworkEntity>();
+            // Limpar asset networks de ativos que não estão na lista selecionada
+            var assetNetworksToRemove = await _dbContext.AssetNetworks
+                .Where(an => !activeAssets.Contains(an.Asset))
+                .ToListAsync(cancellationToken);
+
+            if (assetNetworksToRemove.Any())
+            {
+                _dbContext.AssetNetworks.RemoveRange(assetNetworksToRemove);
+                _logger.LogInformation("Removed {Count} asset networks from assets not in the selected list", assetNetworksToRemove.Count);
+            }
+
+            var entities = new List<AssetNetworkEntity>();
 
             foreach (var asset in activeAssets)
             {
                 try
                 {
                     dynamic networksResponse = await _mercadoBitcoinClient.GetAssetNetworksAsync(asset);
-                    var entities = ((IEnumerable<dynamic>)networksResponse).Select(n => new AssetNetworkEntity
+
+                    // Assumir que networksResponse é uma lista de redes
+                    if (networksResponse is IEnumerable<dynamic> networks)
                     {
-                        Asset = asset,
-                        Network = (string)n.Network,
-                        IsDefault = (bool)n.Is_default,
-                        WithdrawalFee = decimal.Parse((string)n.Withdrawal_fee),
-                        MinWithdrawalAmount = decimal.Parse((string)n.Min_withdrawal_amount),
-                        WithdrawalEnabled = (bool)n.Withdrawal_enabled,
-                        CollectedAt = DateTime.UtcNow
-                    });
-                    allEntities.AddRange(entities);
+                        foreach (var network in networks)
+                        {
+                            var entity = new AssetNetworkEntity
+                            {
+                                Asset = asset,
+                                Network = network.Network?.ToString() ?? "UNKNOWN",
+                                IsDefault = network.IsDefault == true,
+                                WithdrawalFee = ParseDecimal(network.WithdrawalFee ?? network.Fee),
+                                MinWithdrawalAmount = ParseDecimal(network.MinWithdrawalAmount ?? network.MinAmount),
+                                WithdrawalEnabled = network.WithdrawalEnabled == true,
+                                CollectedAt = DateTime.UtcNow
+                            };
+                            entities.Add(entity);
+                        }
+                    }
+                    else
+                    {
+                        // Se não for uma lista, tentar processar como um único objeto
+                        var entity = new AssetNetworkEntity
+                        {
+                            Asset = asset,
+                            Network = networksResponse.Network?.ToString() ?? "UNKNOWN",
+                            IsDefault = networksResponse.IsDefault == true,
+                            WithdrawalFee = ParseDecimal(networksResponse.WithdrawalFee ?? networksResponse.Fee),
+                            MinWithdrawalAmount = ParseDecimal(networksResponse.MinWithdrawalAmount ?? networksResponse.MinAmount),
+                            WithdrawalEnabled = networksResponse.WithdrawalEnabled == true,
+                            CollectedAt = DateTime.UtcNow
+                        };
+                        entities.Add(entity);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -467,11 +562,11 @@ public class DataIngestionService
                 }
             }
 
-            if (allEntities.Any())
+            if (entities.Any())
             {
-                await _dbContext.AssetNetworks.AddRangeAsync(allEntities, cancellationToken);
+                await _dbContext.AssetNetworks.AddRangeAsync(entities, cancellationToken);
                 await _dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("Collected {Count} asset networks for {AssetCount} assets", allEntities.Count, activeAssets.Count);
+                _logger.LogInformation("Collected asset networks for {Count} assets", entities.Count);
             }
         }
         catch (Exception ex)
@@ -479,5 +574,34 @@ public class DataIngestionService
             _logger.LogError(ex, "Error collecting asset networks");
             throw;
         }
+    }
+
+    public async Task<List<string>> GetSymbolsAsync()
+    {
+        return await _dbContext.Symbols
+            .Select(s => s.Symbol)
+            .ToListAsync();
+    }
+
+    private static decimal ParseDecimal(dynamic value)
+    {
+        if (value == null) return 0;
+        if (value is decimal d) return d;
+        if (value is int i) return (decimal)i;
+        if (value is long l) return (decimal)l;
+        if (value is double db) return (decimal)db;
+        if (value is float f) return (decimal)f;
+        return decimal.Parse(value.ToString());
+    }
+
+    private static long ParseLong(dynamic value)
+    {
+        if (value == null) return 0;
+        if (value is long l) return l;
+        if (value is int i) return (long)i;
+        if (value is decimal d) return (long)d;
+        if (value is double db) return (long)db;
+        if (value is float f) return (long)f;
+        return long.Parse(value.ToString());
     }
 }

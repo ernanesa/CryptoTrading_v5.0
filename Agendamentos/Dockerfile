@@ -5,16 +5,16 @@ WORKDIR /src
 
 # Copy csproj and restore as distinct layers
 COPY ["Agendamentos.csproj", "./"]
-RUN dotnet restore "Agendamentos.csproj" --runtime alpine-x64
+RUN dotnet restore "Agendamentos.csproj"
 
 # Copy everything else and build
 COPY . .
-RUN dotnet build "Agendamentos.csproj" -c $BUILD_CONFIGURATION -o /app/build --runtime alpine-x64 --self-contained false
+RUN dotnet build "Agendamentos.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 # Publish stage
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "Agendamentos.csproj" -c $BUILD_CONFIGURATION -o /app/publish --runtime alpine-x64 --self-contained false /p:UseAppHost=false
+RUN dotnet publish "Agendamentos.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine AS final

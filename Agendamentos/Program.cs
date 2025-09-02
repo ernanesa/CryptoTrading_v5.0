@@ -2,6 +2,7 @@ using System.Globalization;
 using Agendamentos;
 using Agendamentos.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -33,6 +34,8 @@ builder.Services.AddDbContext<CryptoTradingDbContext>(options =>
     });
     options.EnableSensitiveDataLogging(false);
     options.EnableServiceProviderCaching();
+    // Suppress the pending model changes warning since we initialize via init.sql
+    options.ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
 });
 
 var host = builder.Build();
@@ -44,10 +47,28 @@ using (var scope = host.Services.CreateScope())
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     var environment = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
 
-    // Execute migrations first
-    logger.LogInformation("🔧 Executando migrações para o serviço Agendamentos...");
-    context.Database.Migrate();
-    logger.LogInformation("✅ Migrações concluídas para o serviço Agendamentos");
+    try
+    {
+        // Check if migrations table exists
+        var migrationsTableExists = context.Database.ExecuteSqlRaw(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = '__EFMigrationsHistory'") > 0;
+
+        if (migrationsTableExists)
+        {
+            logger.LogInformation("🔧 Database already initialized via init.sql, skipping migrations");
+        }
+        else
+        {
+            logger.LogInformation("🔧 Executando migrações para o serviço Agendamentos...");
+            context.Database.Migrate();
+            logger.LogInformation("✅ Migrações concluídas para o serviço Agendamentos");
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Could not check migrations table, attempting migration anyway");
+        context.Database.Migrate();
+    }
 
     // Then seed data
     logger.LogInformation("🌱 Aplicando dados iniciais...");

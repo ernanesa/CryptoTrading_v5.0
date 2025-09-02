@@ -174,4 +174,23 @@ public class DataController : ControllerBase
     {
         return Ok(new { status = "healthy", timestamp = DateTime.UtcNow });
     }
+
+    /// <summary>
+    /// Lista todos os símbolos coletados
+    /// </summary>
+    /// <returns>Lista de símbolos coletados</returns>
+    [HttpGet("symbols")]
+    public async Task<IActionResult> GetSymbols()
+    {
+        try
+        {
+            var symbols = await _dataIngestionService.GetSymbolsAsync();
+            return Ok(symbols);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting symbols");
+            return StatusCode(500, "Error getting symbols");
+        }
+    }
 }

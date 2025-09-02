@@ -5,26 +5,16 @@ WORKDIR /src
 
 # Copy csproj and restore as distinct layers
 COPY ["Dados.csproj", "./"]
-RUN dotnet restore "Dados.csproj" --runtime alpine-x64
-
-# Copy everything else and build
-COPY . .
-RUN dotnet build "Dados.csproj" -c $BUILD_CONFIGURATION -o /app/build --runtime alpine-x64 --self-contained falsege
-FROM mcr.microsoft.com/dotnet/sdk:9.0-alpine AS build
-WORKDIR /src
-
-# Copy csproj and restore dependencies
-COPY ["Dados.csproj", "."]
 RUN dotnet restore "Dados.csproj"
 
 # Copy everything else and build
 COPY . .
-RUN dotnet build "Dados.csproj" -c Release -o /app/build
+RUN dotnet build "Dados.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 # Publish stage
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "Dados.csproj" -c $BUILD_CONFIGURATION -o /app/publish --runtime alpine-x64 --self-contained false /p:UseAppHost=false
+RUN dotnet publish "Dados.csproj" -c $BUILD_CONFIGURATION -o /app/publish
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine AS final
@@ -49,7 +39,7 @@ USER dotnet
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/data/health || exit 1
 
 # Expose port
 EXPOSE 8080
