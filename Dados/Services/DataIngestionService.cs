@@ -4,6 +4,7 @@ using MercadoBitcoin.Client;
 using MercadoBitcoin.Client.Extensions;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+// removed unused usings
 
 namespace Dados.Services;
 
@@ -164,165 +165,137 @@ public class DataIngestionService
     {
         try
         {
-            // Usar lista fixa das 50 melhores criptomoedas
             var activeSymbols = GetTopTier50CryptocurrencyList();
-
             if (!activeSymbols.Any())
             {
                 _logger.LogWarning("No symbols found in the predefined list");
                 return;
             }
 
-            _logger.LogInformation("Starting ticker collection for {Count} symbols", activeSymbols.Count);
+            _logger.LogInformation("Starting ticker collection for {Count} symbols (per-symbol requests)", activeSymbols.Count);
 
-            // Limpar tickers de símbolos que não estão na lista selecionada
-            var tickersToRemove = await _dbContext.Tickers
-                .Where(t => !activeSymbols.Contains(t.Symbol))
-                .ToListAsync(cancellationToken);
-
-            if (tickersToRemove.Any())
+            // Limpar tickers de símbolos fora da lista
+            var toRemove = await _dbContext.Tickers.Where(t => !activeSymbols.Contains(t.Symbol)).ToListAsync(cancellationToken);
+            if (toRemove.Any())
             {
-                _dbContext.Tickers.RemoveRange(tickersToRemove);
+                _dbContext.Tickers.RemoveRange(toRemove);
                 await _dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("Removed {Count} tickers from symbols not in the selected list", tickersToRemove.Count);
+                _logger.LogInformation("Removed {Count} obsolete tickers", toRemove.Count);
             }
 
-            var entities = new List<TickerEntity>();
-            var successCount = 0;
-            var errorCount = 0;
-
-            // Processar um símbolo por vez para evitar problemas
+            var collected = new List<TickerEntity>();
+            int success = 0, errors = 0;
             foreach (var symbol in activeSymbols)
             {
                 try
                 {
-                    _logger.LogInformation("Processing symbol: {Symbol}", symbol);
-                    var startTime = DateTime.UtcNow;
-
-                    dynamic tickerResponse = await _mercadoBitcoinClient.GetTickersAsync(symbol);
-                    var endTime = DateTime.UtcNow;
-
-                    _logger.LogInformation("API call for {Symbol} took {Duration}ms", symbol, (endTime - startTime).TotalMilliseconds);
-
-                    if (tickerResponse == null)
+                    var start = DateTime.UtcNow;
+                    dynamic resp = await _mercadoBitcoinClient.GetTickersAsync(symbol);
+                    var ms = (DateTime.UtcNow - start).TotalMilliseconds;
+                    if (resp == null)
                     {
-                        _logger.LogWarning("Null response for symbol {Symbol}", symbol);
-                        errorCount++;
+                        errors++;
+                        _logger.LogWarning("Null ticker response for {Symbol}", symbol);
                         continue;
                     }
-
-                    // Log detalhado da resposta da API
-                    _logger.LogInformation("Raw API response for {Symbol}: {Response}", symbol, JsonSerializer.Serialize((object)tickerResponse));
-
-                    // A resposta da API é um array, pegar o primeiro elemento
-                    dynamic tickerData;
-                    if (tickerResponse is IEnumerable<dynamic> tickerArray && tickerArray.Any())
+                    // Caso a API retorne array
+                    dynamic data = resp;
+                    if (resp is IEnumerable<dynamic> arr)
                     {
-                        tickerData = tickerArray.First();
-                        _logger.LogInformation("Processing array response for {Symbol}", symbol);
+                        var first = arr.FirstOrDefault();
+                        if (first == null)
+                        {
+                            errors++;
+                            _logger.LogWarning("Empty array ticker response for {Symbol}", symbol);
+                            continue;
+                        }
+                        data = first;
                     }
-                    else
-                    {
-                        tickerData = tickerResponse;
-                        _logger.LogInformation("Processing object response for {Symbol}", symbol);
-                    }
-
-                    // Log dos valores extraídos
-                    _logger.LogInformation("Extracted values for {Symbol}: Last={Last}, High={High}, Low={Low}, Vol={Vol}, Buy={Buy}, Sell={Sell}, Date={Date}",
-                        symbol,
-                        (object)(tickerData?.Last ?? tickerData?.last),
-                        (object)(tickerData?.High ?? tickerData?.high),
-                        (object)(tickerData?.Low ?? tickerData?.low),
-                        (object)(tickerData?.Vol ?? tickerData?.vol),
-                        (object)(tickerData?.Buy ?? tickerData?.buy),
-                        (object)(tickerData?.Sell ?? tickerData?.sell),
-                        (object)(tickerData?.Date ?? tickerData?.date));
-
-                    // Assumir que a resposta é um único objeto ticker
                     var entity = new TickerEntity
                     {
                         Symbol = symbol,
-                        Last = ParseDecimal(tickerData?.Last ?? tickerData?.last),
-                        High = ParseDecimal(tickerData?.High ?? tickerData?.high),
-                        Low = ParseDecimal(tickerData?.Low ?? tickerData?.low),
-                        Vol = ParseDecimal(tickerData?.Vol ?? tickerData?.vol),
-                        Buy = ParseDecimal(tickerData?.Buy ?? tickerData?.buy),
-                        Sell = ParseDecimal(tickerData?.Sell ?? tickerData?.sell),
-                        Date = ParseLong(tickerData?.Date ?? tickerData?.date),
+                        Last = ParseDecimal(data?.Last ?? data?.last),
+                        High = ParseDecimal(data?.High ?? data?.high),
+                        Low = ParseDecimal(data?.Low ?? data?.low),
+                        Vol = ParseDecimal(data?.Vol ?? data?.vol),
+                        Buy = ParseDecimal(data?.Buy ?? data?.buy),
+                        Sell = ParseDecimal(data?.Sell ?? data?.sell),
+                        Date = ParseLong(data?.Date ?? data?.date),
                         CollectedAt = DateTime.UtcNow
                     };
-
-                    _logger.LogInformation("Created entity for {Symbol}: Last={Last}, High={High}, Low={Low}", symbol, entity.Last, entity.High, entity.Low);
-                    entities.Add(entity);
-                    successCount++;
-                    _logger.LogInformation("Successfully processed ticker for {Symbol} ({Success}/{Total})", symbol, successCount, activeSymbols.Count);
+                    collected.Add(entity);
+                    success++;
+                    _logger.LogInformation("Ticker {Symbol} OK in {Ms}ms", symbol, ms);
                 }
                 catch (Exception ex)
                 {
-                    errorCount++;
-                    _logger.LogWarning(ex, "Error collecting ticker for symbol {Symbol} ({Error}/{Total})", symbol, errorCount, activeSymbols.Count);
-                    // Continue com outros símbolos
+                    errors++;
+                    _logger.LogWarning(ex, "Error collecting ticker for {Symbol}", symbol);
                 }
+                await Task.Delay(120, cancellationToken); // leve throttle
             }
 
-            _logger.LogInformation("Collection completed: {Success} successful, {Error} errors out of {Total} symbols", successCount, errorCount, activeSymbols.Count);
-
-            if (entities.Any())
+            _logger.LogInformation("Ticker summary Success={Success} Errors={Errors}", success, errors);
+            if (!collected.Any())
             {
-                _logger.LogInformation("Attempting to save {Count} tickers to database", entities.Count);
+                _logger.LogWarning("No tickers collected");
+                return;
+            }
 
-                // Usar upsert: atualizar se existir, inserir se não existir
-                var strategy = _dbContext.Database.CreateExecutionStrategy();
-                await strategy.ExecuteAsync(async () =>
+            var strategy = _dbContext.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                using var tx = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                try
                 {
-                    using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-
-                    try
+                    foreach (var e in collected)
                     {
-                        foreach (var entity in entities)
+                        var existing = await _dbContext.Tickers.FindAsync(new object[] { e.Symbol }, cancellationToken);
+                        if (existing == null)
                         {
-                            var existing = await _dbContext.Tickers.FindAsync(new object[] { entity.Symbol }, cancellationToken);
-                            if (existing != null)
-                            {
-                                // Atualizar valores existentes
-                                existing.Last = entity.Last;
-                                existing.High = entity.High;
-                                existing.Low = entity.Low;
-                                existing.Vol = entity.Vol;
-                                existing.Buy = entity.Buy;
-                                existing.Sell = entity.Sell;
-                                existing.Date = entity.Date;
-                                existing.CollectedAt = entity.CollectedAt;
-                                _dbContext.Tickers.Update(existing);
-                            }
-                            else
-                            {
-                                // Inserir novo
-                                await _dbContext.Tickers.AddAsync(entity, cancellationToken);
-                            }
+                            await _dbContext.Tickers.AddAsync(e, cancellationToken);
                         }
-
-                        await _dbContext.SaveChangesAsync(cancellationToken);
-                        await transaction.CommitAsync(cancellationToken);
-                        _logger.LogInformation("Saved {Count} tickers to database", entities.Count);
+                        else
+                        {
+                            existing.Last = e.Last;
+                            existing.High = e.High;
+                            existing.Low = e.Low;
+                            existing.Vol = e.Vol;
+                            existing.Buy = e.Buy;
+                            existing.Sell = e.Sell;
+                            existing.Date = e.Date;
+                            existing.CollectedAt = e.CollectedAt;
+                        }
                     }
-                    catch
-                    {
-                        await transaction.RollbackAsync(cancellationToken);
-                        throw;
-                    }
-                });
-            }
-            else
-            {
-                _logger.LogWarning("No tickers were collected successfully");
-            }
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    await tx.CommitAsync(cancellationToken);
+                    _logger.LogInformation("Persisted {Count} tickers", collected.Count);
+                }
+                catch
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error collecting tickers");
             throw;
         }
+    }
+
+    public async Task CollectAllAsync(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("=== START FULL INGESTION ===");
+        await CollectSymbolsAsync(cancellationToken);
+        await CollectTickersAsync(cancellationToken);
+        await CollectOrderBookAsync("10", cancellationToken);
+        await CollectTradesAsync(null, cancellationToken);
+        await CollectCandlesAsync("1h", 24, cancellationToken);
+        await CollectAssetFeesAsync(cancellationToken);
+        await CollectAssetNetworksAsync(cancellationToken);
+        _logger.LogInformation("=== END FULL INGESTION ===");
     }
 
     public async Task CollectOrderBookAsync(string limit = "10", CancellationToken cancellationToken = default)
@@ -338,46 +311,69 @@ public class DataIngestionService
                 return;
             }
 
-            // Limpar order books de símbolos que não estão na lista selecionada
+            // Limpar order books de símbolos fora da lista
             var orderBooksToRemove = await _dbContext.OrderBooks
                 .Where(ob => !activeSymbols.Contains(ob.Symbol))
                 .ToListAsync(cancellationToken);
-
             if (orderBooksToRemove.Any())
             {
                 _dbContext.OrderBooks.RemoveRange(orderBooksToRemove);
-                _logger.LogInformation("Removed {Count} order books from symbols not in the selected list", orderBooksToRemove.Count);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogInformation("Removed {Count} obsolete order books", orderBooksToRemove.Count);
             }
 
-            var entities = new List<OrderBookEntity>();
+            // Remover duplicados mantendo o mais recente por símbolo (PostgreSQL window function)
+            try
+            {
+                var sqlCleanup = "DELETE FROM \"OrderBooks\" ob USING (SELECT \"Id\", ROW_NUMBER() OVER (PARTITION BY \"Symbol\" ORDER BY \"CollectedAt\" DESC) rn FROM \"OrderBooks\") dup WHERE ob.\"Id\" = dup.\"Id\" AND dup.rn > 1;";
+                await _dbContext.Database.ExecuteSqlRawAsync(sqlCleanup, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Duplicate cleanup for order books failed (non-fatal)");
+            }
 
+            int success = 0, errors = 0;
             foreach (var symbol in activeSymbols)
             {
                 try
                 {
                     dynamic orderBookResponse = await _mercadoBitcoinClient.GetOrderBookAsync(symbol, limit);
-                    var entity = new OrderBookEntity
+                    if (orderBookResponse == null)
                     {
-                        Symbol = symbol,
-                        Bids = JsonSerializer.Serialize(orderBookResponse.Bids),
-                        Asks = JsonSerializer.Serialize(orderBookResponse.Asks),
-                        CollectedAt = DateTime.UtcNow
-                    };
-                    entities.Add(entity);
+                        errors++; continue;
+                    }
+                    var bidsJson = JsonSerializer.Serialize(orderBookResponse.Bids);
+                    var asksJson = JsonSerializer.Serialize(orderBookResponse.Asks);
+                    // Upsert manual
+                    var existing = await _dbContext.OrderBooks.FirstOrDefaultAsync(o => o.Symbol == symbol, cancellationToken);
+                    if (existing == null)
+                    {
+                        await _dbContext.OrderBooks.AddAsync(new OrderBookEntity
+                        {
+                            Symbol = symbol,
+                            Bids = bidsJson,
+                            Asks = asksJson,
+                            CollectedAt = DateTime.UtcNow
+                        }, cancellationToken);
+                    }
+                    else
+                    {
+                        existing.Bids = bidsJson;
+                        existing.Asks = asksJson;
+                        existing.CollectedAt = DateTime.UtcNow;
+                    }
+                    success++;
                 }
                 catch (Exception ex)
                 {
+                    errors++;
                     _logger.LogWarning(ex, "Error collecting order book for symbol {Symbol}", symbol);
-                    // Continue com outros símbolos
                 }
+                await Task.Delay(120, cancellationToken);
             }
-
-            if (entities.Any())
-            {
-                await _dbContext.OrderBooks.AddRangeAsync(entities, cancellationToken);
-                await _dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("Collected order books for {Count} symbols", entities.Count);
-            }
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("OrderBook summary Success={Success} Errors={Errors}", success, errors);
         }
         catch (Exception ex)
         {
@@ -388,10 +384,14 @@ public class DataIngestionService
 
     public async Task CollectTradesAsync(int? limit = null, CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("=== COLLECT TRADES STARTED ===");
         try
         {
+            _logger.LogInformation("Starting trade collection process");
+
             // Usar lista fixa das 50 melhores criptomoedas
             var activeSymbols = GetTopTier50CryptocurrencyList();
+            _logger.LogInformation("Found {Count} active symbols for trade collection", activeSymbols.Count);
 
             if (!activeSymbols.Any())
             {
@@ -407,40 +407,82 @@ public class DataIngestionService
             if (tradesToRemove.Any())
             {
                 _dbContext.Trades.RemoveRange(tradesToRemove);
+                await _dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogInformation("Removed {Count} trades from symbols not in the selected list", tradesToRemove.Count);
             }
 
             var allEntities = new List<TradeEntity>();
+            var successCount = 0;
+            var errorCount = 0;
 
+            int requestedLimit = limit ?? 100; // default
             foreach (var symbol in activeSymbols)
             {
                 try
                 {
-                    dynamic tradesResponse = await _mercadoBitcoinClient.GetTradesAsync(symbol, null, null, null, null, limit);
-                    var entities = ((IEnumerable<dynamic>)tradesResponse).Select(t => new TradeEntity
+                    _logger.LogInformation("Collecting trades for {Symbol} (limit {Limit})", symbol, requestedLimit);
+                    var swStart = DateTime.UtcNow;
+                    var tradesResponse = await _mercadoBitcoinClient.GetTradesAsync(symbol, limit: requestedLimit);
+                    var ms = (DateTime.UtcNow - swStart).TotalMilliseconds;
+                    if (tradesResponse == null)
                     {
-                        Symbol = symbol,
-                        Tid = (int)t.Tid,
-                        Date = long.Parse((string)t.Date),
-                        Price = decimal.Parse((string)t.Price),
-                        Type = (string)t.Type,
-                        Amount = decimal.Parse((string)t.Amount),
-                        CollectedAt = DateTime.UtcNow
-                    });
-                    allEntities.AddRange(entities);
+                        errorCount++;
+                        _logger.LogWarning("Null trades response for {Symbol}", symbol);
+                        continue;
+                    }
+                    var list = tradesResponse.ToList();
+                    _logger.LogInformation("Received {Count} trades for {Symbol} in {Ms}ms", list.Count, symbol, ms);
+                    if (list.Count == 0)
+                    {
+                        successCount++; // conta como sucesso vazio
+                        continue;
+                    }
+                    foreach (var t in list)
+                    {
+                        try
+                        {
+                            var entity = new TradeEntity
+                            {
+                                Symbol = symbol,
+                                Tid = (int)(t.Tid ?? 0),
+                                Date = SafeToLong(t.Date),
+                                Price = ParseDecimal(t.Price),
+                                Type = t.Type,
+                                Amount = ParseDecimal(t.Amount),
+                                CollectedAt = DateTime.UtcNow
+                            };
+                            allEntities.Add(entity);
+                        }
+                        catch (Exception inner)
+                        {
+                            errorCount++;
+                            _logger.LogWarning(inner, "Skipping malformed trade for {Symbol}", symbol);
+                        }
+                    }
+                    successCount++;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error collecting trades for symbol {Symbol}", symbol);
-                    // Continue com outros símbolos
+                    errorCount++;
+                    _logger.LogWarning(ex, "Error collecting trades for {Symbol} ({Error}/{Total})", symbol, errorCount, activeSymbols.Count);
                 }
+
+                await Task.Delay(200, cancellationToken); // leve espaçamento
             }
+
+            _logger.LogInformation("Trade collection completed: {Success} successful, {Error} errors out of {Total} symbols", successCount, errorCount, activeSymbols.Count);
 
             if (allEntities.Any())
             {
+                _logger.LogInformation("Attempting to save {Count} trades to database", allEntities.Count);
+
                 await _dbContext.Trades.AddRangeAsync(allEntities, cancellationToken);
                 await _dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("Collected {Count} trades for {SymbolCount} symbols", allEntities.Count, activeSymbols.Count);
+                _logger.LogInformation("Saved {Count} trades to database", allEntities.Count);
+            }
+            else
+            {
+                _logger.LogWarning("No trades were collected successfully");
             }
         }
         catch (Exception ex)
@@ -454,8 +496,11 @@ public class DataIngestionService
     {
         try
         {
+            _logger.LogInformation("Starting candle collection process with resolution {Resolution}", resolution);
+
             // Usar lista fixa das 50 melhores criptomoedas
             var activeSymbols = GetTopTier50CryptocurrencyList();
+            _logger.LogInformation("Found {Count} active symbols for candle collection", activeSymbols.Count);
 
             if (!activeSymbols.Any())
             {
@@ -471,43 +516,126 @@ public class DataIngestionService
             if (candlesToRemove.Any())
             {
                 _dbContext.Candles.RemoveRange(candlesToRemove);
+                await _dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogInformation("Removed {Count} candles from symbols not in the selected list", candlesToRemove.Count);
             }
 
             var to = (int)DateTimeOffset.Now.ToUnixTimeSeconds();
             var allEntities = new List<CandleEntity>();
+            var successCount = 0;
+            var errorCount = 0;
 
             foreach (var symbol in activeSymbols)
             {
                 try
                 {
-                    dynamic candlesResponse = await _mercadoBitcoinClient.GetCandlesAsync(symbol, resolution, to, null, countback);
-                    var entities = ((IEnumerable<dynamic>)candlesResponse).Select(c => new CandleEntity
+                    _logger.LogInformation("Collecting candles for {Symbol}", symbol);
+                    var start = DateTime.UtcNow;
+                    // Preferir método tipado recente (fallback para o antigo se necessário)
+                    IReadOnlyList<dynamic>? typed = null;
+                    try
                     {
-                        Symbol = symbol,
-                        Resolution = resolution,
-                        Timestamp = long.Parse((string)c.Timestamp),
-                        Open = decimal.Parse((string)c.Open),
-                        High = decimal.Parse((string)c.High),
-                        Low = decimal.Parse((string)c.Low),
-                        Close = decimal.Parse((string)c.Close),
-                        Volume = decimal.Parse((string)c.Volume),
-                        CollectedAt = DateTime.UtcNow
-                    });
-                    allEntities.AddRange(entities);
+                        typed = await _mercadoBitcoinClient.GetRecentCandlesTypedAsync(symbol, resolution, countback ?? 24);
+                    }
+                    catch (Exception inner)
+                    {
+                        _logger.LogDebug(inner, "Typed candles fallback for {Symbol}", symbol);
+                    }
+
+                    if (typed != null)
+                    {
+                        foreach (var c in typed)
+                        {
+                            try
+                            {
+                                // Tentativa de propriedades comuns (Timestamp/Open/High/Low/Close/Volume)
+                                long ts = c.Timestamp;
+                                var entity = new CandleEntity
+                                {
+                                    Symbol = symbol,
+                                    Resolution = resolution,
+                                    Timestamp = ts,
+                                    Open = c.Open,
+                                    High = c.High,
+                                    Low = c.Low,
+                                    Close = c.Close,
+                                    Volume = c.Volume,
+                                    CollectedAt = DateTime.UtcNow
+                                };
+                                allEntities.Add(entity);
+                            }
+                            catch (Exception mapEx)
+                            {
+                                _logger.LogDebug(mapEx, "Failed to map typed candle for {Symbol}", symbol);
+                            }
+                        }
+                        successCount++;
+                        var ms = (DateTime.UtcNow - start).TotalMilliseconds;
+                        _logger.LogInformation("Collected {Count} typed candles for {Symbol} in {Ms}ms", typed.Count, symbol, ms);
+                        continue;
+                    }
+
+                    // Fallback para método bruto
+                    dynamic raw = await _mercadoBitcoinClient.GetCandlesAsync(symbol, resolution, to, null, countback);
+                    if (raw == null)
+                    {
+                        errorCount++;
+                        continue;
+                    }
+                    var closes = ((IEnumerable<dynamic>)raw.c).ToList();
+                    var highs = ((IEnumerable<dynamic>)raw.h).ToList();
+                    var lows = ((IEnumerable<dynamic>)raw.l).ToList();
+                    var opens = ((IEnumerable<dynamic>)raw.o).ToList();
+                    var times = ((IEnumerable<dynamic>)raw.t).ToList();
+                    var vols = ((IEnumerable<dynamic>)raw.v).ToList();
+                    int count = times.Count;
+                    for (int i = 0; i < count; i++)
+                    {
+                        try
+                        {
+                            var entity = new CandleEntity
+                            {
+                                Symbol = symbol,
+                                Resolution = resolution,
+                                Timestamp = long.Parse(times[i].ToString()),
+                                Open = ParseDecimal(opens[i]),
+                                High = ParseDecimal(highs[i]),
+                                Low = ParseDecimal(lows[i]),
+                                Close = ParseDecimal(closes[i]),
+                                Volume = ParseDecimal(vols[i]),
+                                CollectedAt = DateTime.UtcNow
+                            };
+                            allEntities.Add(entity);
+                        }
+                        catch (Exception cex)
+                        {
+                            _logger.LogDebug(cex, "Skipping malformed candle index {Index} for {Symbol}", i, symbol);
+                        }
+                    }
+                    successCount++;
+                    _logger.LogInformation("Collected {Count} raw candles for {Symbol}", count, symbol);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error collecting candles for symbol {Symbol}", symbol);
-                    // Continue com outros símbolos
+                    errorCount++;
+                    _logger.LogWarning(ex, "Error collecting candles for {Symbol} ({Error}/{Total})", symbol, errorCount, activeSymbols.Count);
                 }
+                await Task.Delay(200, cancellationToken);
             }
+
+            _logger.LogInformation("Candle collection completed: {Success} successful, {Error} errors out of {Total} symbols", successCount, errorCount, activeSymbols.Count);
 
             if (allEntities.Any())
             {
+                _logger.LogInformation("Attempting to save {Count} candles to database", allEntities.Count);
+
                 await _dbContext.Candles.AddRangeAsync(allEntities, cancellationToken);
                 await _dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("Collected {Count} candles for {SymbolCount} symbols with resolution {Resolution}", allEntities.Count, activeSymbols.Count, resolution);
+                _logger.LogInformation("Saved {Count} candles to database", allEntities.Count);
+            }
+            else
+            {
+                _logger.LogWarning("No candles were collected successfully");
             }
         }
         catch (Exception ex)
@@ -582,9 +710,12 @@ public class DataIngestionService
     {
         try
         {
+            _logger.LogInformation("Starting asset networks collection process");
+
             // Usar lista fixa das 50 melhores criptomoedas e extrair ativos únicos
             var symbols = GetTopTier50CryptocurrencyList();
             var activeAssets = GetUniqueAssetsFromSymbols(symbols);
+            _logger.LogInformation("Found {Count} active assets for network collection", activeAssets.Count);
 
             if (!activeAssets.Any())
             {
@@ -600,63 +731,89 @@ public class DataIngestionService
             if (assetNetworksToRemove.Any())
             {
                 _dbContext.AssetNetworks.RemoveRange(assetNetworksToRemove);
+                await _dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogInformation("Removed {Count} asset networks from assets not in the selected list", assetNetworksToRemove.Count);
             }
 
             var entities = new List<AssetNetworkEntity>();
+            var successCount = 0;
+            var errorCount = 0;
 
             foreach (var asset in activeAssets)
             {
                 try
                 {
+                    _logger.LogInformation("Collecting networks for asset: {Asset}", asset);
+                    var startTime = DateTime.UtcNow;
                     dynamic networksResponse = await _mercadoBitcoinClient.GetAssetNetworksAsync(asset);
+                    var endTime = DateTime.UtcNow;
+                    _logger.LogInformation("API call for {Asset} networks took {Duration}ms", asset, (endTime - startTime).TotalMilliseconds);
 
-                    // Assumir que networksResponse é uma lista de redes
-                    if (networksResponse is IEnumerable<dynamic> networks)
+                    if (networksResponse == null)
                     {
-                        foreach (var network in networks)
+                        _logger.LogWarning("Null response for networks of asset {Asset}", asset);
+                        errorCount++;
+                        continue;
+                    }
+                    _logger.LogInformation("Raw networks response for {Asset}: {Response}", asset, JsonSerializer.Serialize((object)networksResponse));
+
+                    IEnumerable<dynamic> list;
+                    if (networksResponse is IEnumerable<dynamic> enumerable)
+                        list = enumerable;
+                    else
+                        list = new List<dynamic> { networksResponse };
+
+                    int localCount = 0;
+                    foreach (var network in list)
+                    {
+                        try
                         {
-                            var entity = new AssetNetworkEntity
+                            string networkName = TryGetString(() => network.network) ?? TryGetString(() => network.Network) ?? "UNKNOWN";
+                            bool isDefault = TryGetBool(() => network.is_default) || TryGetBool(() => network.IsDefault);
+                            bool withdrawalEnabled = TryGetBool(() => network.withdrawal_enabled) || TryGetBool(() => network.WithdrawalEnabled);
+                            decimal withdrawalFee = TryGetDecimal(() => network.withdrawal_fee) ?? TryGetDecimal(() => network.WithdrawalFee) ?? 0m;
+                            decimal minWithdrawal = TryGetDecimal(() => network.min_withdrawal_amount) ?? TryGetDecimal(() => network.MinWithdrawalAmount) ?? 0m;
+
+                            entities.Add(new AssetNetworkEntity
                             {
                                 Asset = asset,
-                                Network = network.Network?.ToString() ?? "UNKNOWN",
-                                IsDefault = network.IsDefault == true,
-                                WithdrawalFee = ParseDecimal(network.WithdrawalFee ?? network.Fee),
-                                MinWithdrawalAmount = ParseDecimal(network.MinWithdrawalAmount ?? network.MinAmount),
-                                WithdrawalEnabled = network.WithdrawalEnabled == true,
+                                Network = networkName,
+                                IsDefault = isDefault,
+                                WithdrawalFee = withdrawalFee,
+                                MinWithdrawalAmount = minWithdrawal,
+                                WithdrawalEnabled = withdrawalEnabled,
                                 CollectedAt = DateTime.UtcNow
-                            };
-                            entities.Add(entity);
+                            });
+                            localCount++;
+                        }
+                        catch (Exception mapEx)
+                        {
+                            _logger.LogDebug(mapEx, "Failed to map network item for {Asset}", asset);
                         }
                     }
-                    else
-                    {
-                        // Se não for uma lista, tentar processar como um único objeto
-                        var entity = new AssetNetworkEntity
-                        {
-                            Asset = asset,
-                            Network = networksResponse.Network?.ToString() ?? "UNKNOWN",
-                            IsDefault = networksResponse.IsDefault == true,
-                            WithdrawalFee = ParseDecimal(networksResponse.WithdrawalFee ?? networksResponse.Fee),
-                            MinWithdrawalAmount = ParseDecimal(networksResponse.MinWithdrawalAmount ?? networksResponse.MinAmount),
-                            WithdrawalEnabled = networksResponse.WithdrawalEnabled == true,
-                            CollectedAt = DateTime.UtcNow
-                        };
-                        entities.Add(entity);
-                    }
+                    _logger.LogInformation("Mapped {Count} networks for {Asset}", localCount, asset);
+                    successCount++;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error collecting asset networks for {Asset}", asset);
-                    // Continue com outros ativos
+                    errorCount++;
+                    _logger.LogWarning(ex, "Error collecting asset networks for {Asset} ({Error}/{Total})", asset, errorCount, activeAssets.Count);
                 }
             }
 
+            _logger.LogInformation("Asset networks collection completed: {Success} successful, {Error} errors out of {Total} assets", successCount, errorCount, activeAssets.Count);
+
             if (entities.Any())
             {
+                _logger.LogInformation("Attempting to save {Count} asset networks to database", entities.Count);
+
                 await _dbContext.AssetNetworks.AddRangeAsync(entities, cancellationToken);
                 await _dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("Collected asset networks for {Count} assets", entities.Count);
+                _logger.LogInformation("Saved {Count} asset networks to database", entities.Count);
+            }
+            else
+            {
+                _logger.LogWarning("No asset networks were collected successfully");
             }
         }
         catch (Exception ex)
@@ -693,5 +850,33 @@ public class DataIngestionService
         if (value is double db) return (long)db;
         if (value is float f) return (long)f;
         return long.Parse(value.ToString());
+    }
+
+    private long SafeToLong(dynamic value)
+    {
+        try
+        {
+            if (value == null) return 0L;
+            if (value is long l) return l;
+            if (value is int i) return i;
+            if (value is string s && long.TryParse(s, out long parsed)) return parsed;
+            if (long.TryParse(Convert.ToString(value), out long gen)) return gen;
+            return 0L;
+        }
+        catch { return 0L; }
+    }
+
+    private string? TryGetString(Func<dynamic> getter)
+    {
+        try { var v = getter(); return v?.ToString(); } catch { return null; }
+    }
+    private bool TryGetBool(Func<dynamic> getter)
+    {
+        try { var v = getter(); if (v is bool b) return b; if (bool.TryParse(Convert.ToString(v), out bool parsed)) return parsed; } catch { }
+        return false;
+    }
+    private decimal? TryGetDecimal(Func<dynamic> getter)
+    {
+        try { var v = getter(); if (v == null) return null; return ParseDecimal(v); } catch { return null; }
     }
 }

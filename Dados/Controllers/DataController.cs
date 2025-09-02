@@ -28,6 +28,58 @@ public class DataController : ControllerBase
     }
 
     /// <summary>
+    /// Resumo com contagem de registros por tabela e últimos timestamps coletados
+    /// </summary>
+    /// <returns>Objeto com métricas de dados</returns>
+    [HttpGet("summary")]
+    public async Task<IActionResult> GetSummary()
+    {
+        try
+        {
+            var summary = new
+            {
+                Symbols = await _dbContext.Symbols.CountAsync(),
+                Tickers = await _dbContext.Tickers.CountAsync(),
+                OrderBooks = await _dbContext.OrderBooks.CountAsync(),
+                Trades = await _dbContext.Trades.CountAsync(),
+                Candles = await _dbContext.Candles.CountAsync(),
+                AssetFees = await _dbContext.AssetFees.CountAsync(),
+                AssetNetworks = await _dbContext.AssetNetworks.CountAsync(),
+                LastTickerAt = await _dbContext.Tickers.MaxAsync(t => (DateTime?)t.CollectedAt),
+                LastOrderBookAt = await _dbContext.OrderBooks.MaxAsync(t => (DateTime?)t.CollectedAt),
+                LastTradeAt = await _dbContext.Trades.MaxAsync(t => (DateTime?)t.CollectedAt),
+                LastCandleAt = await _dbContext.Candles.MaxAsync(t => (DateTime?)t.CollectedAt),
+                LastAssetFeeAt = await _dbContext.AssetFees.MaxAsync(t => (DateTime?)t.CollectedAt),
+                LastAssetNetworkAt = await _dbContext.AssetNetworks.MaxAsync(t => (DateTime?)t.CollectedAt)
+            };
+            return Ok(summary);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building summary");
+            return StatusCode(500, "Error building summary");
+        }
+    }
+
+    /// <summary>
+    /// Executa a coleta completa de todos os tipos de dados na ordem recomendada
+    /// </summary>
+    [HttpGet("collect-all")]
+    public async Task<IActionResult> CollectAll(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _dataIngestionService.CollectAllAsync(cancellationToken);
+            return Ok("Full ingestion completed");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in CollectAll");
+            return StatusCode(500, "Error executing full ingestion");
+        }
+    }
+
+    /// <summary>
     /// Coleta e persiste todos os símbolos disponíveis na API do Mercado Bitcoin
     /// </summary>
     /// <param name="cancellationToken">Token para cancelamento da operação</param>
@@ -221,6 +273,116 @@ public class DataController : ControllerBase
         {
             _logger.LogError(ex, "Error getting tickers");
             return StatusCode(500, "Error getting tickers");
+        }
+    }
+
+    /// <summary>
+    /// Lista todos os order books coletados
+    /// </summary>
+    /// <returns>Lista de order books coletados</returns>
+    [HttpGet("order-books")]
+    public async Task<IActionResult> GetOrderBooks()
+    {
+        try
+        {
+            var orderBooks = await _dbContext.OrderBooks
+                .OrderBy(ob => ob.Symbol)
+                .ToListAsync();
+            return Ok(orderBooks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting order books");
+            return StatusCode(500, "Error getting order books");
+        }
+    }
+
+    /// <summary>
+    /// Lista todos os trades coletados
+    /// </summary>
+    /// <returns>Lista de trades coletados</returns>
+    [HttpGet("trades")]
+    public async Task<IActionResult> GetTrades()
+    {
+        try
+        {
+            var trades = await _dbContext.Trades
+                .OrderBy(t => t.Symbol)
+                .ThenByDescending(t => t.Date)
+                .Take(100) // Limitar para não sobrecarregar
+                .ToListAsync();
+            return Ok(trades);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting trades");
+            return StatusCode(500, "Error getting trades");
+        }
+    }
+
+    /// <summary>
+    /// Lista todos os candles coletados
+    /// </summary>
+    /// <returns>Lista de candles coletados</returns>
+    [HttpGet("candles")]
+    public async Task<IActionResult> GetCandles()
+    {
+        try
+        {
+            var candles = await _dbContext.Candles
+                .OrderBy(c => c.Symbol)
+                .ThenBy(c => c.Timestamp)
+                .Take(100) // Limitar para não sobrecarregar
+                .ToListAsync();
+            return Ok(candles);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting candles");
+            return StatusCode(500, "Error getting candles");
+        }
+    }
+
+    /// <summary>
+    /// Lista todas as taxas de ativos coletadas
+    /// </summary>
+    /// <returns>Lista de taxas de ativos coletadas</returns>
+    [HttpGet("asset-fees")]
+    public async Task<IActionResult> GetAssetFees()
+    {
+        try
+        {
+            var assetFees = await _dbContext.AssetFees
+                .OrderBy(af => af.Asset)
+                .ToListAsync();
+            return Ok(assetFees);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting asset fees");
+            return StatusCode(500, "Error getting asset fees");
+        }
+    }
+
+    /// <summary>
+    /// Lista todas as redes de ativos coletadas
+    /// </summary>
+    /// <returns>Lista de redes de ativos coletadas</returns>
+    [HttpGet("asset-networks")]
+    public async Task<IActionResult> GetAssetNetworks()
+    {
+        try
+        {
+            var assetNetworks = await _dbContext.AssetNetworks
+                .OrderBy(an => an.Asset)
+                .ThenBy(an => an.Network)
+                .ToListAsync();
+            return Ok(assetNetworks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting asset networks");
+            return StatusCode(500, "Error getting asset networks");
         }
     }
 }
