@@ -1,0 +1,50 @@
+services:
+  postgres_service:
+    image: postgres:17-alpine
+    container_name: postgres_service
+    environment:
+      POSTGRES_USER: Bettina
+      POSTGRES_PASSWORD: Bettina@1234
+      POSTGRES_DB: CryptoTrading_DB
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - cryptotrading_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U Bettina -d CryptoTrading_DB"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  dados_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dados_service
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres_service:
+        condition: service_healthy
+    networks:
+      - cryptotrading_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  cryptotrading_network:
+    driver: bridge

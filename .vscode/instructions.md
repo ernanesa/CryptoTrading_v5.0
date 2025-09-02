@@ -55,11 +55,19 @@ A IA **DEVE** utilizar as seguintes ferramentas para agilizar o desenvolvimento,
 
 ### 4.4. Banco Único (Regra Reforçada)
 
+Iremos trabalhar com o banco de dados Postegresql 17
 É ESTRITAMENTE PROIBIDO criar novos bancos ou variáveis adicionais de banco. Colisões de schema DEVEM ser resolvidas por:
 1.  Criação condicional (`IF NOT EXISTS`) nas migrations.
 2.  Marcação de entidades como `[NotMapped]`.
 3.  Refatoração para consumo via API.
 
+Credenciais do banco:
+# PostgreSQL Database
+POSTGRES_USER=Bettina
+POSTGRES_PASSWORD=Bettina@1234
+POSTGRES_DB=CryptoTrading_DB
+DB_HOST=postgres_service
+DB_PORT=5432
 ## 5. POLÍTICA DE FALHA (FAIL-CLOSED)
 
 Se qualquer uma das regras acima não puder ser seguida, a IA **DEVE** interromper a geração da resposta e informar a violação da regra como um impedimento.
@@ -67,5 +75,12 @@ Se qualquer uma das regras acima não puder ser seguida, a IA **DEVE** interromp
 **Exemplo de Resposta de Falha**:
 "Não foi possível atender à solicitação porque a regra `[NÚMERO_DA_REGRA]` foi violada. Motivo: `[EXPLICAÇÃO]`."
 
+
+Iremos trabalhar com docker e docker-compose para todos os serviços, com imagens pequenas e otimizadas
+
+Nada de implementação simplificada. Sempre implementação completa.
+
+Todas as rotas devem ser GET
+As rotas do serviço de dados não receberão parâmetros. Elas irão pegar informações de todas as moedas que tiverem como ativas no banco
 ---
 **Código real, implementação real, integração real. Nada de fake, mock, simulado ou placeholder, exceto em testes.**
