@@ -173,6 +173,8 @@ public class DataIngestionService
                 return;
             }
 
+            _logger.LogInformation("Starting ticker collection for {Count} symbols", activeSymbols.Count);
+
             // Limpar tickers de símbolos que não estão na lista selecionada
             var tickersToRemove = await _dbContext.Tickers
                 .Where(t => !activeSymbols.Contains(t.Symbol))
@@ -181,10 +183,13 @@ public class DataIngestionService
             if (tickersToRemove.Any())
             {
                 _dbContext.Tickers.RemoveRange(tickersToRemove);
+                await _dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogInformation("Removed {Count} tickers from symbols not in the selected list", tickersToRemove.Count);
             }
 
             var entities = new List<TickerEntity>();
+            var successCount = 0;
+            var errorCount = 0;
 
             // Processar um símbolo por vez para evitar problemas
             foreach (var symbol in activeSymbols)
@@ -192,40 +197,125 @@ public class DataIngestionService
                 try
                 {
                     _logger.LogInformation("Processing symbol: {Symbol}", symbol);
-                    dynamic tickerResponse = await _mercadoBitcoinClient.GetTickersAsync(symbol);
+                    var startTime = DateTime.UtcNow;
 
-                    // var responseJson = JsonSerializer.Serialize(tickerResponse);
-                    // ((ILogger)_logger).LogInformation("Response for {Symbol}: {Response}", symbol, responseJson);
+                    dynamic tickerResponse = await _mercadoBitcoinClient.GetTickersAsync(symbol);
+                    var endTime = DateTime.UtcNow;
+
+                    _logger.LogInformation("API call for {Symbol} took {Duration}ms", symbol, (endTime - startTime).TotalMilliseconds);
+
+                    if (tickerResponse == null)
+                    {
+                        _logger.LogWarning("Null response for symbol {Symbol}", symbol);
+                        errorCount++;
+                        continue;
+                    }
+
+                    // Log detalhado da resposta da API
+                    _logger.LogInformation("Raw API response for {Symbol}: {Response}", symbol, JsonSerializer.Serialize((object)tickerResponse));
+
+                    // A resposta da API é um array, pegar o primeiro elemento
+                    dynamic tickerData;
+                    if (tickerResponse is IEnumerable<dynamic> tickerArray && tickerArray.Any())
+                    {
+                        tickerData = tickerArray.First();
+                        _logger.LogInformation("Processing array response for {Symbol}", symbol);
+                    }
+                    else
+                    {
+                        tickerData = tickerResponse;
+                        _logger.LogInformation("Processing object response for {Symbol}", symbol);
+                    }
+
+                    // Log dos valores extraídos
+                    _logger.LogInformation("Extracted values for {Symbol}: Last={Last}, High={High}, Low={Low}, Vol={Vol}, Buy={Buy}, Sell={Sell}, Date={Date}",
+                        symbol,
+                        (object)(tickerData?.Last ?? tickerData?.last),
+                        (object)(tickerData?.High ?? tickerData?.high),
+                        (object)(tickerData?.Low ?? tickerData?.low),
+                        (object)(tickerData?.Vol ?? tickerData?.vol),
+                        (object)(tickerData?.Buy ?? tickerData?.buy),
+                        (object)(tickerData?.Sell ?? tickerData?.sell),
+                        (object)(tickerData?.Date ?? tickerData?.date));
 
                     // Assumir que a resposta é um único objeto ticker
                     var entity = new TickerEntity
                     {
                         Symbol = symbol,
-                        Last = ParseDecimal(tickerResponse?.Last),
-                        High = ParseDecimal(tickerResponse?.High),
-                        Low = ParseDecimal(tickerResponse?.Low),
-                        Vol = ParseDecimal(tickerResponse?.Vol),
-                        Buy = ParseDecimal(tickerResponse?.Buy),
-                        Sell = ParseDecimal(tickerResponse?.Sell),
-                        Date = ParseLong(tickerResponse?.Date),
+                        Last = ParseDecimal(tickerData?.Last ?? tickerData?.last),
+                        High = ParseDecimal(tickerData?.High ?? tickerData?.high),
+                        Low = ParseDecimal(tickerData?.Low ?? tickerData?.low),
+                        Vol = ParseDecimal(tickerData?.Vol ?? tickerData?.vol),
+                        Buy = ParseDecimal(tickerData?.Buy ?? tickerData?.buy),
+                        Sell = ParseDecimal(tickerData?.Sell ?? tickerData?.sell),
+                        Date = ParseLong(tickerData?.Date ?? tickerData?.date),
                         CollectedAt = DateTime.UtcNow
                     };
 
+                    _logger.LogInformation("Created entity for {Symbol}: Last={Last}, High={High}, Low={Low}", symbol, entity.Last, entity.High, entity.Low);
                     entities.Add(entity);
-                    _logger.LogInformation("Successfully processed ticker for {Symbol}", symbol);
+                    successCount++;
+                    _logger.LogInformation("Successfully processed ticker for {Symbol} ({Success}/{Total})", symbol, successCount, activeSymbols.Count);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error collecting ticker for symbol {Symbol}", symbol);
+                    errorCount++;
+                    _logger.LogWarning(ex, "Error collecting ticker for symbol {Symbol} ({Error}/{Total})", symbol, errorCount, activeSymbols.Count);
                     // Continue com outros símbolos
                 }
             }
 
+            _logger.LogInformation("Collection completed: {Success} successful, {Error} errors out of {Total} symbols", successCount, errorCount, activeSymbols.Count);
+
             if (entities.Any())
             {
-                await _dbContext.Tickers.AddRangeAsync(entities, cancellationToken);
-                await _dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("Collected {Count} tickers for {SymbolCount} predefined symbols", entities.Count, activeSymbols.Count);
+                _logger.LogInformation("Attempting to save {Count} tickers to database", entities.Count);
+
+                // Usar upsert: atualizar se existir, inserir se não existir
+                var strategy = _dbContext.Database.CreateExecutionStrategy();
+                await strategy.ExecuteAsync(async () =>
+                {
+                    using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+                    try
+                    {
+                        foreach (var entity in entities)
+                        {
+                            var existing = await _dbContext.Tickers.FindAsync(new object[] { entity.Symbol }, cancellationToken);
+                            if (existing != null)
+                            {
+                                // Atualizar valores existentes
+                                existing.Last = entity.Last;
+                                existing.High = entity.High;
+                                existing.Low = entity.Low;
+                                existing.Vol = entity.Vol;
+                                existing.Buy = entity.Buy;
+                                existing.Sell = entity.Sell;
+                                existing.Date = entity.Date;
+                                existing.CollectedAt = entity.CollectedAt;
+                                _dbContext.Tickers.Update(existing);
+                            }
+                            else
+                            {
+                                // Inserir novo
+                                await _dbContext.Tickers.AddAsync(entity, cancellationToken);
+                            }
+                        }
+
+                        await _dbContext.SaveChangesAsync(cancellationToken);
+                        await transaction.CommitAsync(cancellationToken);
+                        _logger.LogInformation("Saved {Count} tickers to database", entities.Count);
+                    }
+                    catch
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        throw;
+                    }
+                });
+            }
+            else
+            {
+                _logger.LogWarning("No tickers were collected successfully");
             }
         }
         catch (Exception ex)

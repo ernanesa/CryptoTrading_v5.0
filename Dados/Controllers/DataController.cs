@@ -1,5 +1,8 @@
+using Dados.Data;
 using Dados.Services;
+using MercadoBitcoin.Client;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Dados.Controllers;
 
@@ -8,13 +11,19 @@ namespace Dados.Controllers;
 public class DataController : ControllerBase
 {
     private readonly DataIngestionService _dataIngestionService;
+    private readonly CryptoTradingDbContext _dbContext;
+    private readonly MercadoBitcoinClient _mercadoBitcoinClient;
     private readonly ILogger<DataController> _logger;
 
     public DataController(
         DataIngestionService dataIngestionService,
+        CryptoTradingDbContext dbContext,
+        MercadoBitcoinClient mercadoBitcoinClient,
         ILogger<DataController> logger)
     {
         _dataIngestionService = dataIngestionService;
+        _dbContext = dbContext;
+        _mercadoBitcoinClient = mercadoBitcoinClient;
         _logger = logger;
     }
 
@@ -191,6 +200,27 @@ public class DataController : ControllerBase
         {
             _logger.LogError(ex, "Error getting symbols");
             return StatusCode(500, "Error getting symbols");
+        }
+    }
+
+    /// <summary>
+    /// Lista todos os tickers coletados
+    /// </summary>
+    /// <returns>Lista de tickers coletados</returns>
+    [HttpGet("tickers")]
+    public async Task<IActionResult> GetTickers()
+    {
+        try
+        {
+            var tickers = await _dbContext.Tickers
+                .OrderBy(t => t.Symbol)
+                .ToListAsync();
+            return Ok(tickers);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting tickers");
+            return StatusCode(500, "Error getting tickers");
         }
     }
 }
