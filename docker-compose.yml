@@ -36,11 +36,6 @@ services:
     networks:
       - cryptotrading_network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
   dados_service:
     build:
@@ -58,11 +53,6 @@ services:
     networks:
       - cryptotrading_network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
   
 volumes:
   postgres_data:
