@@ -37,12 +37,12 @@ RUN chown -R dotnet:dotnet /app
 # Switch to non-root user
 USER dotnet
 
-# Health check
+# Health check (alinhado com ASPNETCORE_URLS=8090 definido no docker-compose)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/data/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8090/api/data/health || exit 1
 
-# Expose port
-EXPOSE 8080
+# Expose correct port
+EXPOSE 8090
 
 # Set entrypoint
 ENTRYPOINT ["dotnet", "Dados.dll"]

@@ -1,0 +1,92 @@
+﻿[
+    {
+        "Route":  "collect-symbols",
+        "Status":  200,
+        "Count":  null,
+        "Message":  "Symbols collected successfully"
+    },
+    {
+        "Route":  "symbols",
+        "Status":  200,
+        "Count":  50,
+        "Message":  null
+    },
+    {
+        "Route":  "collect-tickers",
+        "Status":  200,
+        "Count":  null,
+        "Message":  "Tickers collected successfully for all active symbols"
+    },
+    {
+        "Route":  "tickers",
+        "Status":  200,
+        "Count":  45,
+        "Message":  null
+    },
+    {
+        "Route":  "collect-order-books",
+        "Status":  200,
+        "Count":  null,
+        "Message":  "Order books collected successfully for all active symbols"
+    },
+    {
+        "Route":  "order-books",
+        "Status":  200,
+        "Count":  45,
+        "Message":  null
+    },
+    {
+        "Route":  "collect-trades",
+        "Status":  "ERROR",
+        "Count":  null,
+        "Message":  "O servidor remoto retornou um erro: (500) Erro Interno do Servidor."
+    },
+    {
+        "Route":  "trades",
+        "Status":  200,
+        "Count":  0,
+        "Message":  null
+    },
+    {
+        "Route":  "collect-candles",
+        "Status":  200,
+        "Count":  null,
+        "Message":  "Candles collected successfully for all active symbols with resolution 1h"
+    },
+    {
+        "Route":  "candles",
+        "Status":  200,
+        "Count":  100,
+        "Message":  null
+    },
+    {
+        "Route":  "collect-asset-fees",
+        "Status":  200,
+        "Count":  null,
+        "Message":  "Asset fees collected successfully for all active assets"
+    },
+    {
+        "Route":  "asset-fees",
+        "Status":  200,
+        "Count":  33,
+        "Message":  null
+    },
+    {
+        "Route":  "collect-asset-networks",
+        "Status":  200,
+        "Count":  null,
+        "Message":  "Asset networks collected successfully for all active assets"
+    },
+    {
+        "Route":  "asset-networks",
+        "Status":  200,
+        "Count":  0,
+        "Message":  null
+    },
+    {
+        "Route":  "summary",
+        "Status":  200,
+        "Count":  null,
+        "Message":  "symbols            : 50\r\ntickers            : 45\r\norderBooks         : 45\r\ntrades             : 0\r\ncandles            : 4224\r\nassetFees          : 33\r\nassetNetworks      : 0\r\nlastTickerAt       : 2025-09-03T10:01:26.34952Z\r\nlastOrderBookAt    : 2025-09-03T10:01:41.733184Z\r\nlastTradeAt        : \r\nlastCandleAt       : 2025-09-03T10:02:10.003389Z\r\nlastAssetFeeAt     : 2025-09-02T01:15:55.019223Z\r\nlastAssetNetworkAt :"
+    }
+]
