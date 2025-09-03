@@ -53,8 +53,8 @@ public class CollectTradesTests : IDisposable
     public async Task CollectTrades_ShouldReturnInternalServerError_WhenExceptionOccurs()
     {
         // Arrange
-        _mockClient.Setup(x => x.GetTradesAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(), 
-            It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>()))
+        _mockClient.Setup(x => x.GetTradesAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(),
+            It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Test exception"));
 
         await SeedTestData();
@@ -81,10 +81,10 @@ public class CollectTradesTests : IDisposable
 
         // Assert
         Assert.IsType<OkObjectResult>(result);
-        
+
         // Verify that the limit was used in the API call
-        _mockClient.Verify(x => x.GetTradesAsync(It.IsAny<string>(), 
-            It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>(), testLimit), 
+        _mockClient.Verify(x => x.GetTradesAsync(It.IsAny<string>(),
+            It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>(), testLimit, It.IsAny<CancellationToken>()),
             Times.AtLeast(1));
     }
 

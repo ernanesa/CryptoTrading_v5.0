@@ -46,19 +46,19 @@ public class DataIngestionService
     private static decimal ParseDecimal(object? value)
     {
         if (value == null) return 0m;
-        
+
         if (value is decimal decimalValue) return decimalValue;
         if (value is double doubleValue) return (decimal)doubleValue;
         if (value is float floatValue) return (decimal)floatValue;
         if (value is int intValue) return intValue;
         if (value is long longValue) return longValue;
-        
-        if (decimal.TryParse(value.ToString(), System.Globalization.NumberStyles.Any, 
+
+        if (decimal.TryParse(value.ToString(), System.Globalization.NumberStyles.Any,
             System.Globalization.CultureInfo.InvariantCulture, out var result))
         {
             return result;
         }
-        
+
         return 0m;
     }
 
@@ -68,18 +68,18 @@ public class DataIngestionService
     private static long ParseLong(object? value)
     {
         if (value == null) return 0L;
-        
+
         if (value is long longValue) return longValue;
         if (value is int intValue) return intValue;
         if (value is decimal decimalValue) return (long)decimalValue;
         if (value is double doubleValue) return (long)doubleValue;
         if (value is float floatValue) return (long)floatValue;
-        
+
         if (long.TryParse(value.ToString(), out var result))
         {
             return result;
         }
-        
+
         return 0L;
     }
 
@@ -736,23 +736,6 @@ public class DataIngestionService
         }
     }
 
-    /// <summary>
-    /// Obtém a lista de símbolos do banco de dados
-    /// </summary>
-    public async Task<List<SymbolEntity>> GetSymbolsAsync(CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            return await _dbContext.Symbols
-                .OrderBy(s => s.Symbol)
-                .ToListAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting symbols from database");
-            throw;
-        }
-    }
 
     /// <summary>
     /// Coleta todos os dados
@@ -762,8 +745,7 @@ public class DataIngestionService
         try
         {
             _logger.LogInformation("Starting complete data collection");
-            
-            // Ordem recomendada de coleta
+
             await CollectSymbolsAsync(cancellationToken);
             await CollectTickersAsync(cancellationToken);
             await CollectOrderBookAsync(10, cancellationToken);
@@ -771,29 +753,12 @@ public class DataIngestionService
             await CollectCandlesAsync("1h", 24, cancellationToken);
             await CollectAssetFeesAsync(cancellationToken);
             await CollectAssetNetworksAsync(cancellationToken);
-            
+
             _logger.LogInformation("Complete data collection finished successfully");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during complete data collection");
-            throw;
-        }
-    }a collection");
-
-            await CollectSymbolsAsync(cancellationToken);
-            await CollectTickersAsync(cancellationToken);
-            await CollectOrderBookAsync(null, cancellationToken);
-            await CollectTradesAsync(null, cancellationToken);
-            await CollectCandlesAsync(null, null, cancellationToken);
-            await CollectAssetFeesAsync(cancellationToken);
-            await CollectAssetNetworksAsync(cancellationToken);
-
-            _logger.LogInformation("Successfully completed all data collection");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during complete data collection: {Message}", ex.Message);
             throw;
         }
     }
@@ -818,35 +783,4 @@ public class DataIngestionService
         }
     }
 
-    /// <summary>
-    /// Safely parses dynamic values to decimal
-    /// </summary>
-    private static decimal ParseDecimal(dynamic value)
-    {
-        if (value == null) return 0;
-        if (value is decimal d) return d;
-        if (value is int i) return (decimal)i;
-        if (value is long l) return (decimal)l;
-        if (value is double db) return (decimal)db;
-        if (value is float f) return (decimal)f;
-        if (decimal.TryParse(value.ToString(), out decimal result))
-            return result;
-        return 0;
-    }
-
-    /// <summary>
-    /// Safely parses dynamic values to long
-    /// </summary>
-    private static long ParseLong(dynamic value)
-    {
-        if (value == null) return 0;
-        if (value is long l) return l;
-        if (value is int i) return (long)i;
-        if (value is decimal d) return (long)d;
-        if (value is double db) return (long)db;
-        if (value is float f) return (long)f;
-        if (long.TryParse(value.ToString(), out long result))
-            return result;
-        return 0;
-    }
 }

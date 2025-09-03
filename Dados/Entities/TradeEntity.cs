@@ -1,10 +1,8 @@
-using System.ComponentModel.DataAnnotations;
-
 namespace Dados.Entities;
 
 public class TradeEntity
 {
-    [Key]
+    // Tid não é único globalmente; chave real = (Symbol,Tid) configurada no DbContext
     public int Tid { get; set; }
     public string Symbol { get; set; } = string.Empty;
     public long Date { get; set; }

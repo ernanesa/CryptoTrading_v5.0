@@ -38,10 +38,9 @@ public class CryptoTradingDbContext : DbContext
             .Property(ob => ob.Asks)
             .HasColumnType("text");
 
-        // TradeEntity
+        // TradeEntity - composite PK (Symbol, Tid)
         modelBuilder.Entity<TradeEntity>()
-            .HasKey(t => t.Tid);
-        
+            .HasKey(t => new { t.Symbol, t.Tid });
         modelBuilder.Entity<TradeEntity>()
             .HasIndex(t => new { t.Symbol, t.Date })
             .HasDatabaseName("IX_Trades_Symbol_Date");

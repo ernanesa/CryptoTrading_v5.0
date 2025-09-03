@@ -82,5 +82,11 @@ Nada de implementação simplificada. Sempre implementação completa.
 
 Todas as rotas devem ser GET
 As rotas do serviço de dados não receberão parâmetros. Elas irão pegar informações de todas as moedas que tiverem como ativas no banco
+
+Trabalhar, sempre que possível, com consultas em massa e operações em lote para otimizar o desempenho.
+Trabalhar, sempre que possível, com caching para reduzir a carga no banco de dados e melhorar a latência.
+Trabalhar, sempre que possível, com minimal APIs para reduzir a sobrecarga e melhorar a performance.
+Trabalhar, sempre que possível, com AOT (Ahead-of-Time Compilation) para melhorar a performance.
+
 ---
 **Código real, implementação real, integração real. Nada de fake, mock, simulado ou placeholder, exceto em testes.**
