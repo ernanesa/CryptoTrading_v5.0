@@ -87,6 +87,11 @@ Trabalhar, sempre que possível, com consultas em massa e operações em lote pa
 Trabalhar, sempre que possível, com caching para reduzir a carga no banco de dados e melhorar a latência.
 Trabalhar, sempre que possível, com minimal APIs para reduzir a sobrecarga e melhorar a performance.
 Trabalhar, sempre que possível, com AOT (Ahead-of-Time Compilation) para melhorar a performance.
-
+Trabalhar, sempre que possível, com clean architecture para melhorar a manutenibilidade e testabilidade, porém nada de DDD, CQRS ou Event Sourcing.
+Manter, sempre que possível, a simplicidade e clareza no código.
+Minimizar dependências entre módulos e serviços.
+Manter, sempre que possível, a consistência e padronização no código.
+Manter, sempre que possível, a documentação atualizada.
+Manter, sempre que possível, a estrutura de pastas e arquivos simples e organizada, seguindo a convenção de nomes e padrões do projeto, além de boas práticas.
 ---
 **Código real, implementação real, integração real. Nada de fake, mock, simulado ou placeholder, exceto em testes.**
