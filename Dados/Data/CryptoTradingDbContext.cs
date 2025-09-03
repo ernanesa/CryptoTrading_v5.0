@@ -40,7 +40,11 @@ public class CryptoTradingDbContext : DbContext
 
         // TradeEntity
         modelBuilder.Entity<TradeEntity>()
-            .HasKey(t => new { t.Symbol, t.Tid });
+            .HasKey(t => t.Tid);
+        
+        modelBuilder.Entity<TradeEntity>()
+            .HasIndex(t => new { t.Symbol, t.Date })
+            .HasDatabaseName("IX_Trades_Symbol_Date");
 
         // CandleEntity
         modelBuilder.Entity<CandleEntity>()

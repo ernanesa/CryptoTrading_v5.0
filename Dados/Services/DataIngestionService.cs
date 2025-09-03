@@ -41,6 +41,49 @@ public class DataIngestionService
     }
 
     /// <summary>
+    /// Parse seguro de decimal com fallback para zero
+    /// </summary>
+    private static decimal ParseDecimal(object? value)
+    {
+        if (value == null) return 0m;
+        
+        if (value is decimal decimalValue) return decimalValue;
+        if (value is double doubleValue) return (decimal)doubleValue;
+        if (value is float floatValue) return (decimal)floatValue;
+        if (value is int intValue) return intValue;
+        if (value is long longValue) return longValue;
+        
+        if (decimal.TryParse(value.ToString(), System.Globalization.NumberStyles.Any, 
+            System.Globalization.CultureInfo.InvariantCulture, out var result))
+        {
+            return result;
+        }
+        
+        return 0m;
+    }
+
+    /// <summary>
+    /// Parse seguro de long com fallback para zero
+    /// </summary>
+    private static long ParseLong(object? value)
+    {
+        if (value == null) return 0L;
+        
+        if (value is long longValue) return longValue;
+        if (value is int intValue) return intValue;
+        if (value is decimal decimalValue) return (long)decimalValue;
+        if (value is double doubleValue) return (long)doubleValue;
+        if (value is float floatValue) return (long)floatValue;
+        
+        if (long.TryParse(value.ToString(), out var result))
+        {
+            return result;
+        }
+        
+        return 0L;
+    }
+
+    /// <summary>
     /// Lista das top 50 criptomoedas para coleta de dados
     /// </summary>
     private static List<string> GetTopTier50CryptocurrencyList()
@@ -694,6 +737,24 @@ public class DataIngestionService
     }
 
     /// <summary>
+    /// Obtém a lista de símbolos do banco de dados
+    /// </summary>
+    public async Task<List<SymbolEntity>> GetSymbolsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _dbContext.Symbols
+                .OrderBy(s => s.Symbol)
+                .ToListAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting symbols from database");
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Coleta todos os dados
     /// </summary>
     public async Task CollectAllAsync(CancellationToken cancellationToken = default)
@@ -701,6 +762,24 @@ public class DataIngestionService
         try
         {
             _logger.LogInformation("Starting complete data collection");
+            
+            // Ordem recomendada de coleta
+            await CollectSymbolsAsync(cancellationToken);
+            await CollectTickersAsync(cancellationToken);
+            await CollectOrderBookAsync(10, cancellationToken);
+            await CollectTradesAsync(100, cancellationToken);
+            await CollectCandlesAsync("1h", 24, cancellationToken);
+            await CollectAssetFeesAsync(cancellationToken);
+            await CollectAssetNetworksAsync(cancellationToken);
+            
+            _logger.LogInformation("Complete data collection finished successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during complete data collection");
+            throw;
+        }
+    }a collection");
 
             await CollectSymbolsAsync(cancellationToken);
             await CollectTickersAsync(cancellationToken);
