@@ -4,6 +4,13 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+  <!-- Native AOT settings -->
+  <PublishTrimmed>true</PublishTrimmed>
+  <PublishAot>true</PublishAot>
+  <StripSymbols>true</StripSymbols>
+  <InvariantGlobalization>true</InvariantGlobalization>
+  <!-- SelfContained definido somente em publish para evitar erro NETSDK1191 sem RID -->
+  <!-- RID definido em tempo de publish via -r (ex: linux-musl-x64), evitar fixo aqui -->
   </PropertyGroup>
 
   <ItemGroup>

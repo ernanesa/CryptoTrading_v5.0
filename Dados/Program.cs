@@ -68,40 +68,35 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
 
-// Execute migrations and seed
+// Modo Native AOT: evitar EF migrations dinâmicas. Garantir tabelas críticas via SQL idempotente mínimo.
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<CryptoTradingDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    var environment = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
-
     try
     {
-        // Check if migrations table exists
-        var migrationsTableExists = context.Database.ExecuteSqlRaw(
-            "SELECT 1 FROM information_schema.tables WHERE table_name = '__EFMigrationsHistory'") > 0;
-
-        if (migrationsTableExists)
-        {
-            logger.LogInformation("🔧 Database already initialized via init.sql, skipping migrations");
-        }
-        else
-        {
-            logger.LogInformation("🔧 Executando migrações para o serviço Dados...");
-            context.Database.Migrate();
-            logger.LogInformation("✅ Migrações concluídas para o serviço Dados");
-        }
+        logger.LogInformation("🔧 Verificando tabelas essenciais (modo AOT sem migrations)...");
+        // Exemplo: garantir tabela Symbols (demais tabelas assumidas criadas via init.sql ou script externo)
+        var ensureSymbols = @"CREATE TABLE IF NOT EXISTS ""Symbols"" (
+    ""Symbol"" text PRIMARY KEY,
+    ""BaseCurrency"" text NULL,
+    ""QuoteCurrency"" text NULL,
+    ""Status"" text NULL,
+    ""BasePrecision"" int NULL,
+    ""QuotePrecision"" int NULL,
+    ""AmountPrecision"" int NULL,
+    ""MinOrderAmount"" numeric NULL,
+    ""MinOrderValue"" numeric NULL,
+    ""CollectedAt"" timestamp without time zone NULL
+);";
+        context.Database.ExecuteSqlRaw(ensureSymbols);
+        logger.LogInformation("✅ Tabela Symbols verificada");
     }
     catch (Exception ex)
     {
-        logger.LogWarning(ex, "Could not check migrations table, attempting migration anyway");
-        context.Database.Migrate();
+        logger.LogError(ex, "Erro ao garantir tabelas mínimas");
+        throw;
     }
-
-    // Then seed data
-    logger.LogInformation("🌱 Aplicando dados iniciais...");
-    // Note: Dados service doesn't have seed data like Agendamentos
-    logger.LogInformation("✅ Serviço Dados pronto");
 }
 
 app.Services.GetRequiredService<ILogger<Program>>().LogInformation("🚀 Serviço Dados iniciado com sucesso");

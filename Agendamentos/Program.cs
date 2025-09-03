@@ -40,7 +40,7 @@ builder.Services.AddDbContext<CryptoTradingDbContext>(options =>
 
 var host = builder.Build();
 
-// Execute migrations and seed
+// Inicialização sem migrações dinâmicas (compatível com Native AOT)
 using (var scope = host.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<CryptoTradingDbContext>();
@@ -49,32 +49,34 @@ using (var scope = host.Services.CreateScope())
 
     try
     {
-        // Check if migrations table exists
-        var migrationsTableExists = context.Database.ExecuteSqlRaw(
-            "SELECT 1 FROM information_schema.tables WHERE table_name = '__EFMigrationsHistory'") > 0;
-
-        if (migrationsTableExists)
-        {
-            logger.LogInformation("🔧 Database already initialized via init.sql, skipping migrations");
-        }
-        else
-        {
-            logger.LogInformation("🔧 Executando migrações para o serviço Agendamentos...");
-            context.Database.Migrate();
-            logger.LogInformation("✅ Migrações concluídas para o serviço Agendamentos");
-        }
+        logger.LogInformation("🔧 Garantindo existência da tabela Agendamentos (modo AOT, sem migrations)...");
+        var createTableSql = @"CREATE TABLE IF NOT EXISTS ""Agendamentos"" (
+    ""Id"" SERIAL PRIMARY KEY,
+    ""Cron"" TEXT NULL,
+    ""Route"" TEXT NULL,
+    ""IsActive"" BOOLEAN NOT NULL DEFAULT TRUE
+);";
+        context.Database.ExecuteSqlRaw(createTableSql);
+        logger.LogInformation("✅ Tabela Agendamentos verificada/criada");
     }
     catch (Exception ex)
     {
-        logger.LogWarning(ex, "Could not check migrations table, attempting migration anyway");
-        context.Database.Migrate();
+        logger.LogError(ex, "Erro ao garantir tabela Agendamentos");
+        throw;
     }
 
-    // Then seed data
-    logger.LogInformation("🌱 Aplicando dados iniciais...");
-    var isDevelopment = environment.IsDevelopment();
-    await SeedAgendamentos.SeedAsync(context, isDevelopment);
-    logger.LogInformation("✅ Dados iniciais aplicados com sucesso");
+    try
+    {
+        logger.LogInformation("🌱 Aplicando dados iniciais (seed)...");
+        var isDevelopment = environment.IsDevelopment();
+        await SeedAgendamentos.SeedAsync(context, isDevelopment);
+        logger.LogInformation("✅ Seed concluído");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Erro durante seed inicial");
+        throw;
+    }
 }
 
 host.Services.GetRequiredService<ILogger<Program>>().LogInformation("🚀 Serviço Agendamentos iniciado com sucesso");
