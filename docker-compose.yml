@@ -44,16 +44,16 @@ services:
     container_name: dados_service
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_URLS: http://+:8090
     ports:
-      - "8080:8080"
+      - "8090:8090"
     depends_on:
       postgres_service:
         condition: service_healthy
     networks:
       - cryptotrading_network
     restart: unless-stopped
-  
+
 volumes:
   postgres_data:
 

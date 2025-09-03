@@ -9,9 +9,11 @@ RUN dotnet restore "Agendamentos.csproj"
 
 # Copy everything and publish AOT (single native binary)
 COPY . .
-RUN dotnet publish Agendamentos.csproj -c $BUILD_CONFIGURATION -o /app/publish \
-    -r linux-musl-x64 --self-contained true /p:PublishAot=true /p:PublishTrimmed=true \
-    /p:StripSymbols=true /p:InvariantGlobalization=true
+# Instalar toolchain necessária para Native AOT (gcc, musl-dev, clang opcional)
+RUN apk add --no-cache build-base musl-dev clang lld && \
+        dotnet publish Agendamentos.csproj -c $BUILD_CONFIGURATION -o /app/publish \
+            -r linux-musl-x64 --self-contained true /p:PublishAot=true /p:PublishTrimmed=true \
+            /p:StripSymbols=true /p:InvariantGlobalization=true
 
 # Final minimal image (distroless-like) using Alpine as scratch base for musl libs
 FROM alpine:3.19 AS final
